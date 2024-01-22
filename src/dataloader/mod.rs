@@ -76,7 +76,8 @@ use futures_channel::oneshot;
 use futures_timer::Delay;
 use futures_util::future::BoxFuture;
 #[cfg(feature = "tracing")]
-use tracing::{info_span, instrument, Instrument};
+use tracing::{info_span, instrument};
+use tracing_futures::{Instrumented, Instrument};
 #[cfg(feature = "tracing")]
 use tracinglib as tracing;
 
@@ -124,6 +125,8 @@ pub trait Loader<K: Send + Sync + Hash + Eq + Clone + 'static>: Send + Sync + 's
 
     /// Load the data set specified by the `keys`.
     async fn load(&self, keys: &[K]) -> Result<HashMap<K, Self::Value>, Self::Error>;
+
+    fn do_instrument<F>(&self, task: F) -> Instrumented<F>;
 }
 
 struct DataLoaderInner<T> {
@@ -394,14 +397,8 @@ impl<T, C: CacheFactory> DataLoader<T, C> {
                         inner.do_load(disable_cache, keys).await
                     }
                 };
-
-                fn get_type_name<T>(_: &T) -> &str {
-                    std::any::type_name::<T>()
-                }
-                let data_loader = get_type_name(&self.inner.loader);
-
                 #[cfg(feature = "tracing")]
-                let task = task.instrument(info_span!("start_fetch", data_loader)).in_current_span();
+                let task = self.inner.loader.do_instrument(task);
                 (self.spawner)(Box::pin(task))
             }
             Action::Delay => {}
@@ -509,6 +506,10 @@ mod tests {
             assert!(keys.len() <= 10);
             Ok(keys.iter().copied().map(|k| (k, k)).collect())
         }
+
+        fn do_instrument<F>(&self, task: F) -> Instrumented<F> {
+            task.instrument(info_span!("test"))
+        }
     }
 
     #[async_trait::async_trait]
@@ -519,6 +520,10 @@ mod tests {
         async fn load(&self, keys: &[i64]) -> Result<HashMap<i64, Self::Value>, Self::Error> {
             assert!(keys.len() <= 10);
             Ok(keys.iter().copied().map(|k| (k, k)).collect())
+        }
+
+        fn do_instrument<F>(&self, task: F) -> Instrumented<F> {
+            task.instrument(info_span!("test"))
         }
     }
 
@@ -697,6 +702,10 @@ mod tests {
             async fn load(&self, keys: &[i32]) -> Result<HashMap<i32, Self::Value>, Self::Error> {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 Ok(keys.iter().copied().map(|k| (k, k)).collect())
+            }
+
+            fn do_instrument<F>(&self, task: F) -> Instrumented<F> {
+                task.instrument(info_span!("test"))
             }
         }
 
