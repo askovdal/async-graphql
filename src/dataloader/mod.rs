@@ -394,8 +394,14 @@ impl<T, C: CacheFactory> DataLoader<T, C> {
                         inner.do_load(disable_cache, keys).await
                     }
                 };
+
+                fn get_type_name<T>(_: &T) -> &str {
+                    std::any::type_name::<T>()
+                }
+                let data_loader = get_type_name(&self.inner.loader);
+
                 #[cfg(feature = "tracing")]
-                let task = task.instrument(info_span!("start_fetch")).in_current_span();
+                let task = task.instrument(info_span!("start_fetch", data_loader)).in_current_span();
                 (self.spawner)(Box::pin(task))
             }
             Action::Delay => {}
